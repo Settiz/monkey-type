@@ -11,6 +11,11 @@ let currentCommands = commands;
 let restartCount = 0;
 let currentTestLine = 0;
 let pageTransition = false;
+let keypressPerSecond = [];
+let currentKeypressCount = 0;
+let afkDetected = false;
+let errorsPerSecond = [];
+let currentErrorCount = 0;
 
 let accuracyStats = {
   correct: 0,
@@ -290,9 +295,11 @@ function hideCaret() {
 }
 
 function showCaret() {
-  updateCaretPosition();
-  $("#caret").removeClass("hidden");
-  startCaretAnimation();
+  if($("#result").hasClass('hidden')){
+    updateCaretPosition();
+    $("#caret").removeClass("hidden");
+    startCaretAnimation();
+  }
 }
 
 function stopCaretAnimation() {
@@ -457,54 +464,57 @@ function showResult() {
     mode2 = config.words;
   }
   
-  let completedEvent = {
-    wpm: stats.wpm,
-    correctChars: stats.correctChars,
-    incorrectChars: stats.incorrectChars,
-    acc: stats.acc,
-    mode: config.mode,
-    mode2: mode2,
-    punctuation: config.punctuation,
-    timestamp: Date.now(),
-    language: config.language,
-    restartCount: restartCount
-  };
-  console.log(restartCount);
-  restartCount = 0;
-  if (stats.wpm > 0 && stats.wpm < 600 && stats.acc > 50 && stats.acc <= 100) {
-    if (firebase.auth().currentUser != null) {
-      db_getUserHighestWpm(config.mode, mode2, config.punctuation, config.language).then(data => {
-        // console.log(`highest wpm for this mode is ${data}, current is ${stats.wpm}`);
-        if (data < stats.wpm) {
-          hideCrown();
-          showCrown();
-        }
-        completedEvent.uid = firebase.auth().currentUser.uid;
+  if(afkDetected){
+    showNotification("Test invalid",3000);
+  }else{
+    let completedEvent = {
+      wpm: stats.wpm,
+      correctChars: stats.correctChars,
+      incorrectChars: stats.incorrectChars,
+      acc: stats.acc,
+      mode: config.mode,
+      mode2: mode2,
+      punctuation: config.punctuation,
+      timestamp: Date.now(),
+      language: config.language,
+      restartCount: restartCount
+    };
+    restartCount = 0;
+    if (stats.wpm > 0 && stats.wpm < 600 && stats.acc > 50 && stats.acc <= 100) {
+      if (firebase.auth().currentUser != null) {
+        db_getUserHighestWpm(config.mode, mode2, config.punctuation, config.language).then(data => {
+          // console.log(`highest wpm for this mode is ${data}, current is ${stats.wpm}`);
+          if (data < stats.wpm) {
+            hideCrown();
+            showCrown();
+          }
+          completedEvent.uid = firebase.auth().currentUser.uid;
+          try{
+            firebase.analytics().logEvent('testCompleted', completedEvent);
+          }catch(e){
+            console.log("Analytics unavailable");
+          }
+          db_testCompleted(completedEvent);
+          dbSnapshot.unshift(completedEvent);
+        });
+        $("#result .loginTip").addClass('hidden');
+      } else {
         try{
-          firebase.analytics().logEvent('testCompleted', completedEvent);
+          firebase.analytics().logEvent('testCompletedNoLogin', completedEvent);
         }catch(e){
           console.log("Analytics unavailable");
         }
-        db_testCompleted(completedEvent);
-        dbSnapshot.unshift(completedEvent);
-      });
-      $("#result .loginTip").addClass('hidden');
+        $("#result .loginTip").removeClass('hidden');
+
+        // showNotification("Sign in to save your result",3000);
+      }
     } else {
+      showNotification("Test invalid", 3000);
       try{
-        firebase.analytics().logEvent('testCompletedNoLogin', completedEvent);
+        firebase.analytics().logEvent('testCompletedInvalid', completedEvent);
       }catch(e){
         console.log("Analytics unavailable");
       }
-      $("#result .loginTip").removeClass('hidden');
-
-      // showNotification("Sign in to save your result",3000);
-    }
-  } else {
-    showNotification("Test invalid", 3000);
-    try{
-      firebase.analytics().logEvent('testCompletedInvalid', completedEvent);
-    }catch(e){
-      console.log("Analytics unavailable");
     }
   }
 
@@ -539,12 +549,21 @@ function showResult() {
   let mainColor = getComputedStyle(document.body).getPropertyValue('--main-color').replace(' ', '');
   let subColor = getComputedStyle(document.body).getPropertyValue('--sub-color').replace(' ', '');
 
-
   wpmOverTimeChart.options.scales.xAxes[0].ticks.minor.fontColor = subColor;
+  wpmOverTimeChart.options.scales.xAxes[0].scaleLabel.fontColor = subColor;
   wpmOverTimeChart.options.scales.yAxes[0].ticks.minor.fontColor = subColor;
+  wpmOverTimeChart.options.scales.yAxes[1].ticks.minor.fontColor = subColor;
+  wpmOverTimeChart.options.scales.yAxes[0].scaleLabel.fontColor = subColor;
+  wpmOverTimeChart.options.scales.yAxes[1].scaleLabel.fontColor = subColor;
+
+
   wpmOverTimeChart.data.datasets[0].borderColor = mainColor;
   wpmOverTimeChart.data.labels = labels;
   wpmOverTimeChart.data.datasets[0].data = wpmHistory;
+  wpmOverTimeChart.data.datasets[1].data = errorsPerSecond;
+
+
+
   wpmOverTimeChart.update({ duration: 0 });
   swapElements($("#words"),$("#result"),250);
 }
@@ -552,11 +571,16 @@ function showResult() {
 function restartTest() {
   clearIntervals();
   time = 0;
-  let fadetime = 125;
+  afkDetected = false;
+  wpmHistory = [];
   setFocus(false);
   hideCaret();
   testActive = false;
   hideLiveWpm();
+  keypressPerSecond = [];
+  currentKeypressCount = 0;
+  errorsPerSecond = [];
+  currentErrorCount = 0;
   currentTestLine = 0;
   let el = null;
   if($("#words").hasClass('hidden')){
@@ -579,7 +603,6 @@ function restartTest() {
       clearIntervals();
       $("#restartTestButton").css('opacity', 1);
       if ($("#commandLineWrapper").hasClass('hidden')) focusWords();
-      wpmHistory = [];
       hideTimer();
       setTimeout(function() {
         $("#timer")
@@ -634,9 +657,13 @@ function changeCustomText() {
 }
 
 function changeWordCount(wordCount) {
+  wordCount = parseInt(wordCount);
   changeMode("words");
-  config.words = parseInt(wordCount);
+  config.words = wordCount;
   $("#top .config .wordCount .button").removeClass("active");
+  if(![10,25,50,100,200].includes(wordCount)){
+    wordCount = "custom";
+  }
   $("#top .config .wordCount .button[wordCount='" + wordCount + "']").addClass(
     "active"
   );
@@ -838,8 +865,15 @@ $(document).on("click", "#top .logo", (e) => {
 });
 
 $(document).on("click", "#top .config .wordCount .button", (e) => {
-  wrd = e.currentTarget.innerHTML;
-  changeWordCount(wrd);
+  wrd = $(e.currentTarget).attr('wordCount');
+  if(wrd == "custom"){
+    let newWrd = prompt('Custom word amount');
+    if(newWrd !== null && !isNaN(newWrd) && newWrd > 0){
+      changeWordCount(newWrd);
+    }
+  }else{
+    changeWordCount(wrd);
+  }
 });
 
 $(document).on("click", "#top .config .time .button", (e) => {
@@ -972,12 +1006,20 @@ $(document).keypress(function(event) {
       updateLiveWpm(wpm);
       showLiveWpm();
       wpmHistory.push(wpm);
+      keypressPerSecond.push(currentKeypressCount);
+      currentKeypressCount = 0;
+      errorsPerSecond.push(currentErrorCount);
+      currentErrorCount = 0;
+      if(keypressPerSecond[time-1] == 0 && keypressPerSecond[time-2] == 0 && !afkDetected){
+        showNotification("AFK detected",3000);
+        afkDetected = true;
+      }
       if (config.mode == "time") {
         if (time >= config.time) {
           clearIntervals();
           hideCaret();
           testActive = false;
-          showResult();
+          showResult(false);
         }
       }
     }, 1000));
@@ -986,13 +1028,15 @@ $(document).keypress(function(event) {
   }
   if (wordsList[currentWordIndex].substring(currentInput.length, currentInput.length + 1) != event["key"]) {
     accuracyStats.incorrect++;
+    currentErrorCount++;
   } else {
     accuracyStats.correct++;
   }
+  currentKeypressCount++;
   currentInput += event["key"];
-    setFocus(true);
-    compareInput();
-    updateCaretPosition();
+  setFocus(true);
+  compareInput();
+  updateCaretPosition();
 });
 
 //handle keyboard events
@@ -1113,7 +1157,7 @@ if (window.location.hostname === "localhost") {
 $(document).ready(() => {
   updateFavicon(32,14);
   $('body').css('transition', '.25s');
-  restartTest();
+  // restartTest();
   if (config.quickTab) {
     $("#restartTestButton").addClass('hidden');
   }
@@ -1130,13 +1174,24 @@ let wpmOverTimeChart = new Chart(ctx, {
       data: [],
       // backgroundColor: 'rgba(255, 255, 255, 0.25)',
       borderColor: 'rgba(125, 125, 125, 1)',
-      borderWidth: 2
+      borderWidth: 2,
+      yAxisID: "wpm"
+    },
+    {
+      label: "errors",
+      data: [],
+      // backgroundColor: 'rgba(255, 255, 255, 0.25)',
+      borderColor: 'rgba(255, 125, 125, 1)',
+      borderWidth: 2,
+      yAxisID: "error"
     }],
   },
   options: {
     tooltips: {
       titleFontFamily: "Roboto Mono",
-      bodyFontFamily: "Roboto Mono"
+      bodyFontFamily: "Roboto Mono",
+      mode: 'x',
+      intersect: false
     },
     legend: {
       display: false,
@@ -1146,13 +1201,9 @@ let wpmOverTimeChart = new Chart(ctx, {
     },
     responsive: true,
     maintainAspectRatio: false,
-    tooltips: {
-      mode: 'index',
-      intersect: false,
-    },
     hover: {
-      mode: 'nearest',
-      intersect: true
+      mode: 'x',
+      intersect: false
     },
     scales: {
 
@@ -1162,21 +1213,42 @@ let wpmOverTimeChart = new Chart(ctx, {
         },
         display: true,
         scaleLabel: {
-          display: false,
-          labelString: 'Seconds'
+          display: true,
+          labelString: 'Seconds',
+          fontFamily: "Roboto Mono"
         }
       }],
       yAxes: [{
+        id: "wpm",
         display: true,
         scaleLabel: {
-          display: false,
-          labelString: 'Words per Minute'
+          display: true,
+          labelString: 'Words per Minute',
+          fontFamily: 'Roboto Mono'
         },
         ticks: {
           fontFamily: 'Roboto Mono',
           beginAtZero: true
         }
-      }]
+      },
+      {
+        id: "error",
+        display: true,
+        scaleLabel: {
+          display: true,
+          labelString: 'Errors',
+          fontFamily: 'Roboto Mono'
+        },
+        ticks: {
+          precision:0,
+          fontFamily: 'Roboto Mono',
+          beginAtZero: true
+        },
+        gridLines: {
+          display:false
+        }
+      }
+    ]
     }
   }
 });

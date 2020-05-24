@@ -9,6 +9,9 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="themes/dark.css" id="currentTheme">
   <link id="favicon" rel="shortcut icon" href="favicon.png">
+  <meta name="description" content="A super customisable, minimalistic typing test.">
+  <meta name="keywords" content="typing, test, typing-test, monkey-type, monkey, type, miodec, wpm">
+  <meta name="author" content="Miodec">
 </head>
 <body>
   <div class="notification">Signed in</div>
@@ -128,6 +131,7 @@
             <div class="button active" wordCount="50" tabindex="2">50</div>
             <div class="button" wordCount="100" tabindex="2">100</div>
             <div class="button" wordCount="200" tabindex="2">200</div>
+            <div class="button" wordCount="custom" tabindex="2"><i class="fas fa-tools"></i></div>
           </div>
         </div>
         <div class="group time hidden">
@@ -137,7 +141,7 @@
             <div class="button active" timeConfig="30" tabindex="2">30</div>
             <div class="button" timeConfig="60" tabindex="2">60</div>
             <div class="button" timeConfig="120" tabindex="2">120</div>
-            <div class="button" timeConfig="custom" tabindex="2"><i class="far fa-clock"></i></div>
+            <div class="button" timeConfig="custom" tabindex="2"><i class="fas fa-tools"></i></div>
           </div>
         </div>
         <div class="group customText hidden">
@@ -178,7 +182,7 @@
             </div>
           </div>
           <div class="chart">
-            <div class="title">wpm over time</div>
+            <!-- <div class="title">wpm over time</div> -->
             <canvas id="wpmChart"></canvas>
           </div>
           <div class="loginTip">Sign in to save your results</div>
