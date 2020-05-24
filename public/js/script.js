@@ -1099,7 +1099,7 @@ $(document).keydown((event) => {
 loadConfigFromCookie();
 getReleasesFromGitHub();
 
-if (firebase.app().options.projectId === "monkey-type-dev-67af4") {
+if (firebase.app().options.projectId === "monkey-type-df347") {
   $("#top .logo .bottom").text("monkey-dev");
   $("head title").text("Monkey Dev")
 }
